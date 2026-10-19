@@ -75,13 +75,14 @@ footer{text-align:center;color:var(--muted);font-size:12px;padding:15px}
 <p class="note">BUY or SELL is shown only when the experimental model and trend, RSI and candle price-action checks agree. Otherwise the recommendation is WAIT. The model score is not a verified probability of profit. Confirm the live broker price, market conditions, spread and risk before making any trading decision. This dashboard never places orders.</p>
 </section>
 
-<footer>App build: 2026-10-19-fix5 · Manual analysis only · BUY / SELL / WAIT · Automatic trading: DISABLED</footer>
+<footer>App build: 2026-10-19-fix6 · Automatic M5 monitoring + manual analysis · Automatic trading: DISABLED</footer>
 </main>
 
 <script>
 const API = "https://xauusd-ai-api-ka8j.onrender.com";
 const $ = id => document.getElementById(id);
 let busy = false;
+let lastAutoCandle = null;
 
 function showSignal(text, cls, detail) {
   $("signal").textContent = text;
@@ -99,7 +100,7 @@ async function loadPrediction(manual = false) {
   if (busy) return;
   busy = true;
   $("refresh").disabled = true;
-  $("status").textContent = "Running a fresh on-demand analysis…";
+  $("status").textContent = manual ? "Running manual analysis…" : "Automatic monitoring · checking latest closed M5 candle…";
   $("updated").textContent = "You requested a new analysis. Checking the latest available prediction…";
   try {
     const controller = new AbortController();
@@ -113,6 +114,12 @@ async function loadPrediction(manual = false) {
     if (!response.ok) { let body = ""; try { body = await response.text(); } catch (_) {} throw new Error("Prediction endpoint returned HTTP " + response.status + (body ? ": " + body.slice(0, 220) : "")); }
     const data = await response.json();
     if (data.detail) throw new Error(typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail));
+    const candleKey = data.latest_closed_candle_utc || null;
+    if (!manual && candleKey && candleKey === lastAutoCandle) {
+      $("status").textContent = "Monitoring · no new closed M5 candle yet";
+      return;
+    }
+    if (candleKey) lastAutoCandle = candleKey;
     if (data.symbol !== "XAUUSD") throw new Error("Unexpected symbol returned");
     $("price").textContent = Number.isFinite(Number(data.candle_close_price))
       ? Number(data.candle_close_price).toFixed(3) : "Unavailable";
@@ -150,8 +157,10 @@ async function loadPrediction(manual = false) {
     $("refresh").disabled = false;
   }
 }
-showSignal("READY", "wait", "Press Analyze Gold Now when you want a new analysis.");
-$("status").textContent = "Idle · no request made yet";
+showSignal("CONNECTING…", "wait", "Checking for the latest closed M5 candle.");
+$("status").textContent = "Automatic monitoring · checking every 60 seconds";
+loadPrediction(false);
+setInterval(() => loadPrediction(false), 60000);
 </script>
 </body>
 </html>
