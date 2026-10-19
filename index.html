@@ -1,0 +1,136 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>XAUUSD Gold Signals</title>
+<style>
+:root{color-scheme:dark;--bg:#08110f;--card:#111e1a;--green:#39d98a;--red:#ff646e;--muted:#a7b8b0}
+*{box-sizing:border-box}
+body{margin:0;background:radial-gradient(circle at top,#183329,#08110f 55%);color:#f3faf6;font-family:Arial,sans-serif;min-height:100vh;padding:22px}
+main{max-width:760px;margin:auto}
+header{text-align:center;padding:22px 0}
+h1{margin:0;font-size:clamp(27px,6vw,40px);letter-spacing:1px}
+.sub{color:var(--muted);margin-top:9px}
+.card{background:var(--card);border:1px solid #294238;border-radius:18px;padding:22px;margin:15px 0;box-shadow:0 12px 32px #0003}
+.label{color:var(--muted);font-size:13px;text-transform:uppercase;letter-spacing:1px}
+.signal{text-align:center;padding:27px 12px}
+#signal{font-size:clamp(38px,10vw,62px);font-weight:800;margin:12px 0}
+#signal.buy{color:var(--green)}#signal.sell{color:var(--red)}
+#signal.wait{color:#f6c76b}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.metric{background:#0b1713;border-radius:12px;padding:16px;min-width:0}
+.value{font-size:clamp(19px,4vw,27px);font-weight:bold;margin-top:10px;overflow-wrap:anywhere}
+.note{font-size:13px;color:var(--muted);line-height:1.55}
+button{border:0;border-radius:10px;padding:13px 18px;background:var(--green);color:#062016;font-weight:bold;font-size:15px;cursor:pointer}
+button:disabled{opacity:.6}
+.row{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+#status{color:var(--muted);font-size:13px}
+.warning{border-color:#79602b;background:#201c12}
+footer{text-align:center;color:var(--muted);font-size:12px;padding:15px}
+@media(max-width:430px){body{padding:12px}.card{padding:17px}.grid{gap:9px}.metric{padding:12px}}
+</style>
+</head>
+<body>
+<main>
+<header>
+<div style="color:#39d98a;font-weight:bold;letter-spacing:4px;margin-bottom:12px">GOLD MARKET MONITOR</div>
+<h1>XAUUSD SIGNALS</h1>
+<div class="sub">AI-assisted gold market direction · M5</div>
+</header>
+
+<section class="card signal">
+<div class="label">Current model direction</div>
+<div id="signal" class="wait">CONNECTING…</div>
+<div id="signalText">Loading prediction from your API</div>
+</section>
+
+<section class="card">
+<div class="grid">
+<div class="metric"><div class="label">Candle close price</div><div class="value" id="price">—</div></div>
+<div class="metric"><div class="label">Model score</div><div class="value" id="score">—</div></div>
+<div class="metric"><div class="label">Latest closed M5 candle (UTC)</div><div class="value" style="font-size:15px" id="candle">—</div></div>
+<div class="metric"><div class="label">Candle delay</div><div class="value" id="delay">—</div></div>
+</div>
+</section>
+
+<section class="card">
+<div class="row">
+<div><div class="label">Data connection</div><p id="status">Not checked yet</p></div>
+<button id="refresh" onclick="loadPrediction()">Refresh now</button>
+</div>
+<p class="note" id="updated">Waiting for first response.</p>
+</section>
+
+<section class="card warning">
+<strong>⚠ Experimental — not a guaranteed trading signal</strong>
+<p class="note">BUY means the model predicts UP; SELL means it predicts DOWN. The model score is not a verified probability of profit. Confirm the live broker price, market conditions, spread and risk before making any trading decision. This dashboard never places orders.</p>
+</section>
+
+<footer>Automatic trading: DISABLED · Refresh interval: 60 seconds</footer>
+</main>
+
+<script>
+const API = "https://xauusd-ai-api-ka8j.onrender.com";
+const $ = id => document.getElementById(id);
+let busy = false;
+
+function showSignal(text, cls, detail) {
+  $("signal").textContent = text;
+  $("signal").className = cls;
+  $("signalText").textContent = detail;
+}
+function isFresh(data) {
+  if (typeof data.candle_delay_minutes === "number")
+    return data.candle_delay_minutes >= 0 && data.candle_delay_minutes <= 10;
+  if (typeof data.stale === "boolean") return !data.stale;
+  if (data.data_status) return data.data_status === "fresh";
+  return false;
+}
+async function loadPrediction() {
+  if (busy) return;
+  busy = true;
+  $("refresh").disabled = true;
+  $("status").textContent = "Checking API…";
+  try {
+    const response = await fetch(API + "/predict", {cache:"no-store"});
+    if (!response.ok) throw new Error("Prediction endpoint returned HTTP " + response.status);
+    const data = await response.json();
+    if (data.symbol !== "XAUUSD") throw new Error("Unexpected symbol returned");
+    $("price").textContent = Number.isFinite(Number(data.candle_close_price))
+      ? Number(data.candle_close_price).toFixed(3) : "Unavailable";
+    $("score").textContent = Number.isFinite(Number(data.model_score))
+      ? Number(data.model_score).toFixed(3) : "Unavailable";
+    $("candle").textContent = data.latest_closed_candle_utc
+      ? new Date(data.latest_closed_candle_utc).toLocaleString("en-GB",{timeZone:"UTC",hour12:false}) + " UTC" : "Unavailable";
+    $("delay").textContent = Number.isFinite(Number(data.candle_delay_minutes))
+      ? Number(data.candle_delay_minutes).toFixed(1) + " min" : "Unknown";
+
+    const fresh = isFresh(data);
+    const direction = String(data.prediction || "").toUpperCase();
+    if (!fresh || data.status !== "experimental_research_only") {
+      showSignal("WAIT", "wait", "Data freshness or API status needs verification.");
+    } else if (direction === "UP") {
+      showSignal("BUY", "buy", "Model direction: UP · Experimental; confirm before any trade.");
+    } else if (direction === "DOWN") {
+      showSignal("SELL", "sell", "Model direction: DOWN · Experimental; confirm before any trade.");
+    } else {
+      showSignal("WAIT", "wait", "No recognized prediction. Do not trade from this result.");
+    }
+    $("status").textContent = fresh ? "Connected · candle appears fresh" : "Connected · data may be stale";
+    $("updated").textContent = "Last checked: " + new Date().toLocaleString();
+  } catch (err) {
+    showSignal("NO DATA", "wait", "Unable to verify a current prediction. Do not trade.");
+    $("status").textContent = "Connection error";
+    $("updated").textContent = String(err.message || err) + ". Try refreshing in a moment.";
+  } finally {
+    busy = false;
+    $("refresh").disabled = false;
+  }
+}
+loadPrediction();
+setInterval(loadPrediction, 60000);
+</script>
+</body>
+</html>
