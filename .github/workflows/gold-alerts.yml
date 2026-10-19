@@ -13,28 +13,70 @@ jobs:
   check-signal:
     runs-on: ubuntu-latest
     steps:
-      - name: Check XAUUSD prediction
+      - name: Check prediction and notify Telegram
         env:
           API_URL: https://xauusd-ai-api-ka8j.onrender.com/predict
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           python - <<'PY'
           import json
           import os
           import urllib.request
+          import urllib.parse
 
-          url = os.environ["API_URL"]
-          req = urllib.request.Request(url, headers={"User-Agent": "XAUUSD-Gold-Alerts"})
-          with urllib.request.urlopen(req, timeout=60) as response:
-              data = json.load(response)
+          def get_json(url):
+              req = urllib.request.Request(
+                  url, headers={"User-Agent": "XAUUSD-Gold-Alerts"}
+              )
+              with urllib.request.urlopen(req, timeout=60) as response:
+                  return json.load(response)
+
+          data = get_json(os.environ["API_URL"])
 
           print(json.dumps(data, indent=2))
 
           if data.get("trading_enabled") is not False:
-              raise SystemExit("Safety check failed: expected trading to be disabled")
+              raise SystemExit("Safety check failed: trading must remain disabled")
 
           if data.get("status") != "experimental_research_only":
-              raise SystemExit("Prediction status is not the expected research-only status")
+              raise SystemExit("Prediction is not marked research-only")
 
-          if data.get("prediction") not in ("UP", "DOWN"):
+          prediction = data.get("prediction")
+          if prediction not in ("UP", "DOWN"):
               raise SystemExit("No valid prediction received")
+
+          token = os.environ["TELEGRAM_BOT_TOKEN"]
+          chat_id = os.environ["TELEGRAM_CHAT_ID"]
+
+          if not token or not chat_id:
+              raise SystemExit("Telegram secrets are missing")
+
+          direction = "BUY / UP" if prediction == "UP" else "SELL / DOWN"
+          message = (
+              "XAUUSD experimental research alert\n\n"
+              f"Direction: {direction}\n"
+              f"Timeframe: {data.get('timeframe', 'unknown')}\n"
+              f"Latest closed candle (UTC): {data.get('latest_closed_candle_utc', 'unknown')}\n"
+              f"Price: {data.get('candle_close_price', 'unknown')}\n"
+              f"Model score: {data.get('model_score', 'unknown')}\n"
+              f"Candle delay (minutes): {data.get('candle_delay_minutes', 'unknown')}\n\n"
+              "Research only — not a verified trading signal or probability of profit. "
+              "No trades are placed automatically."
+          )
+
+          url = f"https://api.telegram.org/bot{token}/sendMessage"
+          body = urllib.parse.urlencode({
+              "chat_id": chat_id,
+              "text": message
+          }).encode()
+
+          req = urllib.request.Request(url, data=body, method="POST")
+          with urllib.request.urlopen(req, timeout=30) as response:
+              result = json.load(response)
+
+          if not result.get("ok"):
+              raise SystemExit("Telegram did not confirm message delivery")
+
+          print("Telegram confirmed the alert was sent.")
           PY
