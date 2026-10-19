@@ -75,7 +75,7 @@ footer{text-align:center;color:var(--muted);font-size:12px;padding:15px}
 <p class="note">BUY or SELL is shown only when the experimental model and trend, RSI and candle price-action checks agree. Otherwise the recommendation is WAIT. The model score is not a verified probability of profit. Confirm the live broker price, market conditions, spread and risk before making any trading decision. This dashboard never places orders.</p>
 </section>
 
-<footer>App build: 2026-10-19-fix6 · Automatic M5 monitoring + manual analysis · Automatic trading: DISABLED</footer>
+<footer>App build: 2026-10-19-fix7 · Automatic checks every 25 seconds + manual analysis · Automatic trading: DISABLED</footer>
 </main>
 
 <script>
@@ -158,9 +158,9 @@ async function loadPrediction(manual = false) {
   }
 }
 showSignal("CONNECTING…", "wait", "Checking for the latest closed M5 candle.");
-$("status").textContent = "Automatic monitoring · checking every 60 seconds";
+$("status").textContent = "Automatic monitoring · checking every 25 seconds";
 loadPrediction(false);
-setInterval(() => loadPrediction(false), 60000);
+setInterval(() => loadPrediction(false), 25000);
 </script>
 </body>
 </html>
