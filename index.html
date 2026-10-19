@@ -58,7 +58,7 @@ footer{text-align:center;color:var(--muted);font-size:12px;padding:15px}
 <section class="card">
 <div class="row">
 <div><div class="label">Data connection</div><p id="status">Not checked yet</p></div>
-<button id="refresh" onclick="loadPrediction()">Refresh now</button>
+<button id="refresh" onclick="loadPrediction(true)">⚡ Analyze Gold Now</button>
 </div>
 <p class="note" id="updated">Waiting for first response.</p>
 </section>
@@ -68,7 +68,7 @@ footer{text-align:center;color:var(--muted);font-size:12px;padding:15px}
 <p class="note">BUY means the model predicts UP; SELL means it predicts DOWN. The model score is not a verified probability of profit. Confirm the live broker price, market conditions, spread and risk before making any trading decision. This dashboard never places orders.</p>
 </section>
 
-<footer>Automatic trading: DISABLED · Refresh interval: 60 seconds</footer>
+<footer>Manual analysis available · Automatic trading: DISABLED · Background refresh: 60 seconds</footer>
 </main>
 
 <script>
@@ -88,13 +88,14 @@ function isFresh(data) {
   if (data.data_status) return data.data_status === "fresh";
   return false;
 }
-async function loadPrediction() {
+async function loadPrediction(manual = false) {
   if (busy) return;
   busy = true;
   $("refresh").disabled = true;
-  $("status").textContent = "Checking API…";
+  $("status").textContent = manual ? "Running a fresh on-demand analysis…" : "Checking API…";
+  if (manual) $("updated").textContent = "You requested a new analysis. Checking the latest available prediction…";
   try {
-    const response = await fetch(API + "/predict", {cache:"no-store"});
+    const response = await fetch(API + "/predict" + (manual ? "?trigger=" + Date.now() : ""), {cache:"no-store"});
     if (!response.ok) throw new Error("Prediction endpoint returned HTTP " + response.status);
     const data = await response.json();
     if (data.symbol !== "XAUUSD") throw new Error("Unexpected symbol returned");
@@ -119,7 +120,7 @@ async function loadPrediction() {
       showSignal("WAIT", "wait", "No recognized prediction. Do not trade from this result.");
     }
     $("status").textContent = fresh ? "Connected · candle appears fresh" : "Connected · data may be stale";
-    $("updated").textContent = "Last checked: " + new Date().toLocaleString();
+    $("updated").textContent = "(manual ? "Analysis requested at: " : "Last checked: ") + new Date().toLocaleString();
   } catch (err) {
     showSignal("NO DATA", "wait", "Unable to verify a current prediction. Do not trade.");
     $("status").textContent = "Connection error";
