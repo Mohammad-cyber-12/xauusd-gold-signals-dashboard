@@ -120,7 +120,7 @@ async function loadPrediction(manual = false) {
       showSignal("WAIT", "wait", "No recognized prediction. Do not trade from this result.");
     }
     $("status").textContent = fresh ? "Connected · candle appears fresh" : "Connected · data may be stale";
-    $("updated").textContent = "(manual ? "Analysis requested at: " : "Last checked: ") + new Date().toLocaleString();
+    $("updated").textContent = (manual ? "Analysis requested at: " : "Last checked: ") + new Date().toLocaleString();
   } catch (err) {
     showSignal("NO DATA", "wait", "Unable to verify a current prediction. Do not trade.");
     $("status").textContent = "Connection error";
