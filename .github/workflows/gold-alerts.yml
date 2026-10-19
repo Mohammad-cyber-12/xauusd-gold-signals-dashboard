@@ -7,13 +7,20 @@ on:
     - cron: "*/5 * * * *"
 
 permissions:
-  contents: read
+  contents: write
+
+concurrency:
+  group: xauusd-gold-alerts
+  cancel-in-progress: false
 
 jobs:
   check-signal:
     runs-on: ubuntu-latest
     steps:
-      - name: Check prediction and notify Telegram
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check prediction and send new-candle alert
         env:
           API_URL: https://xauusd-ai-api-ka8j.onrender.com/predict
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -21,62 +28,144 @@ jobs:
         run: |
           python - <<'PY'
           import json
+          import math
           import os
+          import subprocess
           import urllib.request
           import urllib.parse
+          from pathlib import Path
 
-          def get_json(url):
-              req = urllib.request.Request(
-                  url, headers={"User-Agent": "XAUUSD-Gold-Alerts"}
-              )
-              with urllib.request.urlopen(req, timeout=60) as response:
-                  return json.load(response)
+          # Fetch the latest prediction.
+          request = urllib.request.Request(
+              os.environ["API_URL"],
+              headers={"User-Agent": "XAUUSD-Gold-Alerts"}
+          )
 
-          data = get_json(os.environ["API_URL"])
-
-          print(json.dumps(data, indent=2))
+          try:
+              with urllib.request.urlopen(request, timeout=60) as response:
+                  data = json.load(response)
+          except Exception:
+              raise SystemExit("Could not retrieve the prediction API.")
 
           if data.get("trading_enabled") is not False:
-              raise SystemExit("Safety check failed: trading must remain disabled")
+              raise SystemExit("Safety check failed: trading must be disabled.")
 
           if data.get("status") != "experimental_research_only":
-              raise SystemExit("Prediction is not marked research-only")
+              raise SystemExit("Prediction is not marked research-only.")
 
           prediction = data.get("prediction")
           if prediction not in ("UP", "DOWN"):
-              raise SystemExit("No valid prediction received")
+              raise SystemExit("Invalid prediction.")
 
-          token = os.environ["TELEGRAM_BOT_TOKEN"]
-          chat_id = os.environ["TELEGRAM_CHAT_ID"]
+          candle_time = data.get("latest_closed_candle_utc")
+          if not isinstance(candle_time, str) or not candle_time:
+              raise SystemExit("Missing candle timestamp.")
+
+          delay = data.get("candle_delay_minutes")
+          if (not isinstance(delay, (int, float))
+                  or not math.isfinite(delay)
+                  or delay < 0 or delay > 15):
+              raise SystemExit("Candle data is stale or its age is invalid.")
+
+          price = data.get("candle_close_price")
+          score = data.get("model_score")
+
+          if not isinstance(price, (int, float)) or not math.isfinite(price):
+              raise SystemExit("Invalid candle close price.")
+
+          if not isinstance(score, (int, float)) or not math.isfinite(score):
+              raise SystemExit("Invalid model score.")
+
+          token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+          chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
 
           if not token or not chat_id:
-              raise SystemExit("Telegram secrets are missing")
+              raise SystemExit("Telegram secrets are missing.")
+
+          # Save the timestamp of the last successfully alerted candle.
+          state_path = Path(".github/last_signal.json")
+          state_path.parent.mkdir(parents=True, exist_ok=True)
+
+          try:
+              previous = json.loads(state_path.read_text(encoding="utf-8"))
+          except FileNotFoundError:
+              previous = {}
+
+          if previous.get("candle_time") == candle_time:
+              print("This candle was already alerted. No duplicate sent.")
+              raise SystemExit(0)
 
           direction = "BUY / UP" if prediction == "UP" else "SELL / DOWN"
+
           message = (
-              "XAUUSD experimental research alert\n\n"
+              "🟡 XAUUSD M5 Research Alert\n\n"
               f"Direction: {direction}\n"
-              f"Timeframe: {data.get('timeframe', 'unknown')}\n"
-              f"Latest closed candle (UTC): {data.get('latest_closed_candle_utc', 'unknown')}\n"
-              f"Price: {data.get('candle_close_price', 'unknown')}\n"
-              f"Model score: {data.get('model_score', 'unknown')}\n"
-              f"Candle delay (minutes): {data.get('candle_delay_minutes', 'unknown')}\n\n"
-              "Research only — not a verified trading signal or probability of profit. "
-              "No trades are placed automatically."
+              f"Closed candle (UTC): {candle_time}\n"
+              f"Candle close price: {price}\n"
+              f"Experimental model score: {score}\n"
+              f"Candle delay: {delay:.2f} minutes\n\n"
+              "⚠️ Experimental research only. The model score is not a "
+              "reliable probability of profit. This is not a guaranteed "
+              "trading signal. No trades are placed automatically."
           )
 
+          # Send the Telegram message. Never print the token or request URL.
           url = f"https://api.telegram.org/bot{token}/sendMessage"
-          body = urllib.parse.urlencode({
+          payload = urllib.parse.urlencode({
               "chat_id": chat_id,
               "text": message
           }).encode()
 
-          req = urllib.request.Request(url, data=body, method="POST")
-          with urllib.request.urlopen(req, timeout=30) as response:
-              result = json.load(response)
+          telegram_request = urllib.request.Request(
+              url,
+              data=payload,
+              headers={"Content-Type": "application/x-www-form-urlencoded"},
+              method="POST"
+          )
+
+          try:
+              with urllib.request.urlopen(
+                  telegram_request, timeout=30
+              ) as response:
+                  result = json.load(response)
+          except Exception:
+              raise SystemExit(
+                  "Telegram delivery failed. Check the saved GitHub secrets."
+              )
 
           if not result.get("ok"):
-              raise SystemExit("Telegram did not confirm message delivery")
+              raise SystemExit("Telegram did not confirm delivery.")
 
-          print("Telegram confirmed the alert was sent.")
+          # Save the candle only after Telegram confirms delivery.
+          state_path.write_text(
+              json.dumps({
+                  "candle_time": candle_time,
+                  "prediction": prediction
+              }, indent=2) + "\n",
+              encoding="utf-8"
+          )
+
+          subprocess.run(
+              ["git", "config", "user.name", "github-actions[bot]"],
+              check=True
+          )
+          subprocess.run(
+              ["git", "config", "user.email",
+               "41898282+github-actions[bot]@users.noreply.github.com"],
+              check=True
+          )
+          subprocess.run(["git", "add", str(state_path)], check=True)
+
+          subprocess.run(
+              ["git", "commit", "-m", "Save last alerted XAUUSD candle"],
+              check=True,
+              stdout=subprocess.DEVNULL
+          )
+          subprocess.run(["git", "push"], check=True)
+
+          print("Telegram alert sent; candle state saved.")
           PY
+
+
+
+   
