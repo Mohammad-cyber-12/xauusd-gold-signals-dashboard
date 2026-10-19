@@ -71,7 +71,7 @@ footer{text-align:center;color:var(--muted);font-size:12px;padding:15px}
 <p class="note">BUY means the model predicts UP; SELL means it predicts DOWN. The model score is not a verified probability of profit. Confirm the live broker price, market conditions, spread and risk before making any trading decision. This dashboard never places orders.</p>
 </section>
 
-<footer>App build: 2026-10-19-fix3 · Manual analysis available · Automatic trading: DISABLED · Background refresh: 60 seconds</footer>
+<footer>App build: 2026-10-19-fix4 · Manual analysis available · Automatic trading: DISABLED · Background refresh: 60 seconds</footer>
 </main>
 
 <script>
@@ -95,19 +95,20 @@ async function loadPrediction(manual = false) {
   if (busy) return;
   busy = true;
   $("refresh").disabled = true;
-  $("status").textContent = manual ? "Running a fresh on-demand analysis…" : "Checking API…";
+  $("status").textContent = manual ? "Running a fresh on-demand analysis…" : "JavaScript active · requesting API…";
   if (manual) $("updated").textContent = "You requested a new analysis. Checking the latest available prediction…";
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 60000);
     let response;
     try {
-      response = await fetch(API + "/predict" + (manual ? "?trigger=" + Date.now() : ""), {cache:"no-store", signal:controller.signal});
+      response = await fetch(API + "/predict?nocache=" + Date.now(), {cache:"no-store", signal:controller.signal});
     } finally {
       clearTimeout(timeoutId);
     }
-    if (!response.ok) throw new Error("Prediction endpoint returned HTTP " + response.status);
+    if (!response.ok) { let body = ""; try { body = await response.text(); } catch (_) {} throw new Error("Prediction endpoint returned HTTP " + response.status + (body ? ": " + body.slice(0, 220) : "")); }
     const data = await response.json();
+    if (data.detail) throw new Error(typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail));
     if (data.symbol !== "XAUUSD") throw new Error("Unexpected symbol returned");
     $("price").textContent = Number.isFinite(Number(data.candle_close_price))
       ? Number(data.candle_close_price).toFixed(3) : "Unavailable";
