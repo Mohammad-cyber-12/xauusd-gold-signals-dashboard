@@ -46,7 +46,7 @@ footer{text-align:center;color:var(--muted);font-size:12px;padding:15px}
 <section class="card signal">
 <div class="label">Current model direction</div>
 <div id="signal" class="wait">CONNECTING…</div>
-<div id="signalText">Loading prediction from your API</div>
+<div id="signalText">Press Analyze Gold Now to request an analysis</div>
 </section>
 
 <section class="card">
@@ -55,6 +55,9 @@ footer{text-align:center;color:var(--muted);font-size:12px;padding:15px}
 <div class="metric"><div class="label">Model score</div><div class="value" id="score">—</div></div>
 <div class="metric"><div class="label">Latest closed M5 candle (UTC)</div><div class="value" style="font-size:15px" id="candle">—</div></div>
 <div class="metric"><div class="label">Candle delay</div><div class="value" id="delay">—</div></div>
+<div class="metric"><div class="label">Trend check</div><div class="value" id="trend">—</div></div>
+<div class="metric"><div class="label">RSI (14)</div><div class="value" id="rsi">—</div></div>
+<div class="metric"><div class="label">Price action</div><div class="value" id="priceAction">—</div></div>
 </div>
 </section>
 
@@ -63,15 +66,16 @@ footer{text-align:center;color:var(--muted);font-size:12px;padding:15px}
 <div><div class="label">Data connection</div><p id="status">Not checked yet</p></div>
 <button id="refresh" onclick="loadPrediction(true)">⚡ Analyze Gold Now</button>
 </div>
-<p class="note" id="updated">Waiting for first response.</p>
+<p class="note" id="reason">No analysis requested yet.</p>
+<p class="note" id="updated">Press Analyze Gold Now when you want a fresh analysis.</p>
 </section>
 
 <section class="card warning">
 <strong>⚠ Experimental — not a guaranteed trading signal</strong>
-<p class="note">BUY means the model predicts UP; SELL means it predicts DOWN. The model score is not a verified probability of profit. Confirm the live broker price, market conditions, spread and risk before making any trading decision. This dashboard never places orders.</p>
+<p class="note">BUY or SELL is shown only when the experimental model and trend, RSI and candle price-action checks agree. Otherwise the recommendation is WAIT. The model score is not a verified probability of profit. Confirm the live broker price, market conditions, spread and risk before making any trading decision. This dashboard never places orders.</p>
 </section>
 
-<footer>App build: 2026-10-19-fix4 · Manual analysis available · Automatic trading: DISABLED · Background refresh: 60 seconds</footer>
+<footer>App build: 2026-10-19-fix5 · Manual analysis only · BUY / SELL / WAIT · Automatic trading: DISABLED</footer>
 </main>
 
 <script>
@@ -95,8 +99,8 @@ async function loadPrediction(manual = false) {
   if (busy) return;
   busy = true;
   $("refresh").disabled = true;
-  $("status").textContent = manual ? "Running a fresh on-demand analysis…" : "JavaScript active · requesting API…";
-  if (manual) $("updated").textContent = "You requested a new analysis. Checking the latest available prediction…";
+  $("status").textContent = "Running a fresh on-demand analysis…";
+  $("updated").textContent = "You requested a new analysis. Checking the latest available prediction…";
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 60000);
@@ -118,22 +122,27 @@ async function loadPrediction(manual = false) {
       ? new Date(data.latest_closed_candle_utc).toLocaleString("en-GB",{timeZone:"UTC",hour12:false}) + " UTC" : "Unavailable";
     $("delay").textContent = Number.isFinite(Number(data.candle_delay_minutes))
       ? Number(data.candle_delay_minutes).toFixed(1) + " min" : "Unknown";
+    $("trend").textContent = data.trend || "Unavailable";
+    $("rsi").textContent = Number.isFinite(Number(data.rsi)) ? Number(data.rsi).toFixed(1) : "Unavailable";
+    $("priceAction").textContent = data.price_action || "Unavailable";
+    $("reason").textContent = data.decision_reason || "Decision explanation unavailable.";
 
     const fresh = isFresh(data);
-    const direction = String(data.prediction || "").toUpperCase();
-    if (!fresh || data.status !== "experimental_research_only") {
+    const recommendation = String(data.recommendation || "WAIT").toUpperCase();
+    if (!fresh || data.status !== "experimental_research_only" || data.trading_enabled !== false) {
       showSignal("WAIT", "wait", "Data freshness or API status needs verification.");
-    } else if (direction === "UP") {
-      showSignal("BUY", "buy", "Model direction: UP · Experimental; confirm before any trade.");
-    } else if (direction === "DOWN") {
-      showSignal("SELL", "sell", "Model direction: DOWN · Experimental; confirm before any trade.");
+    } else if (recommendation === "BUY") {
+      showSignal("BUY", "buy", "Model and technical checks agree · Experimental only.");
+    } else if (recommendation === "SELL") {
+      showSignal("SELL", "sell", "Model and technical checks agree · Experimental only.");
     } else {
-      showSignal("WAIT", "wait", "No recognized prediction. Do not trade from this result.");
+      showSignal("WAIT", "wait", data.decision_reason || "Checks do not align. No trade recommendation.");
     }
     $("status").textContent = fresh ? "Connected · candle appears fresh" : "Connected · data may be stale";
-    $("updated").textContent = (manual ? "Analysis requested at: " : "Last checked: ") + new Date().toLocaleString();
+    $("updated").textContent = "Analysis completed at: " + new Date().toLocaleString();
   } catch (err) {
     showSignal("NO DATA", "wait", "Unable to verify a current prediction. Do not trade.");
+    $("reason").textContent = "Analysis unavailable: " + String(err.message || err);
     $("status").textContent = "Connection error";
     $("updated").textContent = String(err.message || err) + ". Try refreshing in a moment.";
   } finally {
@@ -141,8 +150,8 @@ async function loadPrediction(manual = false) {
     $("refresh").disabled = false;
   }
 }
-loadPrediction();
-setInterval(loadPrediction, 60000);
+showSignal("READY", "wait", "Press Analyze Gold Now when you want a new analysis.");
+$("status").textContent = "Idle · no request made yet";
 </script>
 </body>
 </html>
