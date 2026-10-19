@@ -1,5 +1,5 @@
 
-name: XAUUSD Gold Alerts
+name: XAUUSD Gold Alerts - Scheduled
 
 on:
   workflow_dispatch:
@@ -16,6 +16,8 @@ concurrency:
 jobs:
   check-signal:
     runs-on: ubuntu-latest
+    timeout-minutes: 3
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -35,7 +37,8 @@ jobs:
           import urllib.parse
           from pathlib import Path
 
-          # Fetch the latest prediction.
+          print("Checking XAUUSD prediction API...")
+
           request = urllib.request.Request(
               os.environ["API_URL"],
               headers={"User-Agent": "XAUUSD-Gold-Alerts"}
@@ -44,58 +47,83 @@ jobs:
           try:
               with urllib.request.urlopen(request, timeout=60) as response:
                   data = json.load(response)
-          except Exception:
-              raise SystemExit("Could not retrieve the prediction API.")
+          except Exception as exc:
+              raise SystemExit(
+                  f"Prediction API request failed: {type(exc).__name__}"
+              )
 
           if data.get("trading_enabled") is not False:
-              raise SystemExit("Safety check failed: trading must be disabled.")
+              raise SystemExit(
+                  "Safety check failed: automatic trading must be disabled."
+              )
 
           if data.get("status") != "experimental_research_only":
-              raise SystemExit("Prediction is not marked research-only.")
+              raise SystemExit(
+                  "Prediction is not marked research-only."
+              )
 
           prediction = data.get("prediction")
           if prediction not in ("UP", "DOWN"):
-              raise SystemExit("Invalid prediction.")
+              raise SystemExit("Invalid prediction direction.")
 
           candle_time = data.get("latest_closed_candle_utc")
           if not isinstance(candle_time, str) or not candle_time:
-              raise SystemExit("Missing candle timestamp.")
+              raise SystemExit("Missing closed-candle timestamp.")
 
           delay = data.get("candle_delay_minutes")
-          if (not isinstance(delay, (int, float))
-                  or not math.isfinite(delay)
-                  or delay < 0 or delay > 15):
-              raise SystemExit("Candle data is stale or its age is invalid.")
+          if (
+              not isinstance(delay, (int, float))
+              or not math.isfinite(delay)
+              or delay < 0
+              or delay > 15
+          ):
+              raise SystemExit(
+                  "Candle data is stale or its age is invalid."
+              )
 
           price = data.get("candle_close_price")
           score = data.get("model_score")
 
-          if not isinstance(price, (int, float)) or not math.isfinite(price):
+          if (
+              not isinstance(price, (int, float))
+              or not math.isfinite(price)
+          ):
               raise SystemExit("Invalid candle close price.")
 
-          if not isinstance(score, (int, float)) or not math.isfinite(score):
+          if (
+              not isinstance(score, (int, float))
+              or not math.isfinite(score)
+          ):
               raise SystemExit("Invalid model score.")
 
           token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
           chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
 
           if not token or not chat_id:
-              raise SystemExit("Telegram secrets are missing.")
+              raise SystemExit(
+                  "Telegram secrets are missing from GitHub settings."
+              )
 
-          # Save the timestamp of the last successfully alerted candle.
           state_path = Path(".github/last_signal.json")
           state_path.parent.mkdir(parents=True, exist_ok=True)
 
           try:
-              previous = json.loads(state_path.read_text(encoding="utf-8"))
+              previous = json.loads(
+                  state_path.read_text(encoding="utf-8")
+              )
           except FileNotFoundError:
               previous = {}
 
           if previous.get("candle_time") == candle_time:
-              print("This candle was already alerted. No duplicate sent.")
+              print(
+                  f"No new closed candle ({candle_time}); "
+                  "skipping duplicate alert."
+              )
               raise SystemExit(0)
 
-          direction = "BUY / UP" if prediction == "UP" else "SELL / DOWN"
+          direction = (
+              "BUY / UP" if prediction == "UP" else "SELL / DOWN"
+          )
 
           message = (
               "🟡 XAUUSD M5 Research Alert\n\n"
@@ -104,22 +132,28 @@ jobs:
               f"Candle close price: {price}\n"
               f"Experimental model score: {score}\n"
               f"Candle delay: {delay:.2f} minutes\n\n"
-              "⚠️ Experimental research only. The model score is not a "
-              "reliable probability of profit. This is not a guaranteed "
-              "trading signal. No trades are placed automatically."
+              "⚠️ Experimental research only. The model score is not "
+              "a reliable probability of profit. This is not a "
+              "guaranteed trading signal. No trades are placed "
+              "automatically."
           )
 
-          # Send the Telegram message. Never print the token or request URL.
-          url = f"https://api.telegram.org/bot{token}/sendMessage"
+          print("New candle detected. Sending Telegram alert...")
+
+          telegram_url = (
+              f"https://api.telegram.org/bot{token}/sendMessage"
+          )
           payload = urllib.parse.urlencode({
               "chat_id": chat_id,
               "text": message
           }).encode()
 
           telegram_request = urllib.request.Request(
-              url,
+              telegram_url,
               data=payload,
-              headers={"Content-Type": "application/x-www-form-urlencoded"},
+              headers={
+                  "Content-Type": "application/x-www-form-urlencoded"
+              },
               method="POST"
           )
 
@@ -128,15 +162,17 @@ jobs:
                   telegram_request, timeout=30
               ) as response:
                   result = json.load(response)
-          except Exception:
+          except Exception as exc:
               raise SystemExit(
-                  "Telegram delivery failed. Check the saved GitHub secrets."
+                  f"Telegram delivery request failed: "
+                  f"{type(exc).__name__}"
               )
 
           if not result.get("ok"):
               raise SystemExit("Telegram did not confirm delivery.")
 
-          # Save the candle only after Telegram confirms delivery.
+          print("Telegram confirmed delivery.")
+
           state_path.write_text(
               json.dumps({
                   "candle_time": candle_time,
@@ -146,26 +182,40 @@ jobs:
           )
 
           subprocess.run(
-              ["git", "config", "user.name", "github-actions[bot]"],
+              [
+                  "git", "config", "user.name",
+                  "github-actions[bot]"
+              ],
               check=True
           )
           subprocess.run(
-              ["git", "config", "user.email",
-               "41898282+github-actions[bot]@users.noreply.github.com"],
+              [
+                  "git", "config", "user.email",
+                  "41898282+github-actions[bot]@users.noreply.github.com"
+              ],
               check=True
           )
-          subprocess.run(["git", "add", str(state_path)], check=True)
 
           subprocess.run(
-              ["git", "commit", "-m", "Save last alerted XAUUSD candle"],
-              check=True,
-              stdout=subprocess.DEVNULL
+              ["git", "add", str(state_path)],
+              check=True
           )
-          subprocess.run(["git", "push"], check=True)
 
-          print("Telegram alert sent; candle state saved.")
+          changed = subprocess.run(
+              ["git", "diff", "--cached", "--quiet"]
+          )
+
+          if changed.returncode == 0:
+              print("No state change to commit.")
+          else:
+              subprocess.run(
+                  [
+                      "git", "commit", "-m",
+                      "Save last alerted XAUUSD candle"
+                  ],
+                  check=True
+              )
+              subprocess.run(["git", "push"], check=True)
+
+          print("Alert completed successfully.")
           PY
-
-
-
-   
