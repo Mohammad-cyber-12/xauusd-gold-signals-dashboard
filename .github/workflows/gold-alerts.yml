@@ -1,0 +1,40 @@
+
+name: XAUUSD Gold Alerts
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/5 * * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  check-signal:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check XAUUSD prediction
+        env:
+          API_URL: https://xauusd-ai-api-ka8j.onrender.com/predict
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          url = os.environ["API_URL"]
+          req = urllib.request.Request(url, headers={"User-Agent": "XAUUSD-Gold-Alerts"})
+          with urllib.request.urlopen(req, timeout=60) as response:
+              data = json.load(response)
+
+          print(json.dumps(data, indent=2))
+
+          if data.get("trading_enabled") is not False:
+              raise SystemExit("Safety check failed: expected trading to be disabled")
+
+          if data.get("status") != "experimental_research_only":
+              raise SystemExit("Prediction status is not the expected research-only status")
+
+          if data.get("prediction") not in ("UP", "DOWN"):
+              raise SystemExit("No valid prediction received")
+          PY
