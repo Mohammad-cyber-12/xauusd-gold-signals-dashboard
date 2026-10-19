@@ -68,7 +68,7 @@ footer{text-align:center;color:var(--muted);font-size:12px;padding:15px}
 <p class="note">BUY means the model predicts UP; SELL means it predicts DOWN. The model score is not a verified probability of profit. Confirm the live broker price, market conditions, spread and risk before making any trading decision. This dashboard never places orders.</p>
 </section>
 
-<footer>Manual analysis available · Automatic trading: DISABLED · Background refresh: 60 seconds</footer>
+<footer>App build: 2026-10-19-fix2 · Manual analysis available · Automatic trading: DISABLED · Background refresh: 60 seconds</footer>
 </main>
 
 <script>
@@ -95,7 +95,14 @@ async function loadPrediction(manual = false) {
   $("status").textContent = manual ? "Running a fresh on-demand analysis…" : "Checking API…";
   if (manual) $("updated").textContent = "You requested a new analysis. Checking the latest available prediction…";
   try {
-    const response = await fetch(API + "/predict" + (manual ? "?trigger=" + Date.now() : ""), {cache:"no-store"});
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60000);
+    let response;
+    try {
+      response = await fetch(API + "/predict" + (manual ? "?trigger=" + Date.now() : ""), {cache:"no-store", signal:controller.signal});
+    } finally {
+      clearTimeout(timeoutId);
+    }
     if (!response.ok) throw new Error("Prediction endpoint returned HTTP " + response.status);
     const data = await response.json();
     if (data.symbol !== "XAUUSD") throw new Error("Unexpected symbol returned");
