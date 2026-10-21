@@ -61,6 +61,14 @@ footer{text-align:center;color:var(--muted);font-size:12px;padding:15px}
 </div>
 </section>
 
+<section class="card warning">
+<div class="label">Research validation gate</div>
+<h2 style="margin:10px 0">WAIT ONLY — validation incomplete</h2>
+<p class="note">Offline research audit: 48,914 chronological out-of-sample predictions. Logistic regression directional accuracy was 51.33%, while the baseline reached 51.69%. This does not demonstrate a reliable predictive edge.</p>
+<p class="note">Important: those results came from an M1 model predicting direction over 10 minutes. This phone dashboard uses a separate M5 Random Forest model predicting the next candle. The offline results do not validate this deployed model.</p>
+<p class="note"><strong>Safety rule:</strong> BUY/SELL recommendations are disabled until this deployed model passes its own leakage-checked, cost-aware out-of-sample evaluation. This page is for monitoring and research only.</p>
+</section>
+
 <section class="card">
 <div class="row">
 <div><div class="label">Data connection</div><p id="status">Not checked yet</p></div>
@@ -75,7 +83,7 @@ footer{text-align:center;color:var(--muted);font-size:12px;padding:15px}
 <p class="note">BUY or SELL is shown only when the experimental model and trend, RSI and candle price-action checks agree. Otherwise the recommendation is WAIT. The model score is not a verified probability of profit. Confirm the live broker price, market conditions, spread and risk before making any trading decision. This dashboard never places orders.</p>
 </section>
 
-<footer>App build: 2026-10-19-fix7 · Automatic checks every 25 seconds + manual analysis · Automatic trading: DISABLED</footer>
+<footer>App build: 2026-10-21-research-gate · Automatic checks every 25 seconds + manual analysis · Automatic trading: DISABLED</footer>
 </main>
 
 <script>
@@ -138,6 +146,8 @@ async function loadPrediction(manual = false) {
     const recommendation = String(data.recommendation || "WAIT").toUpperCase();
     if (!fresh || data.status !== "experimental_research_only" || data.trading_enabled !== false) {
       showSignal("WAIT", "wait", "Data freshness or API status needs verification.");
+    } else if (data.research_gate !== "validated") {
+      showSignal("WAIT", "wait", "Research validation is incomplete. BUY/SELL recommendations are disabled.");
     } else if (recommendation === "BUY") {
       showSignal("BUY", "buy", "Model and technical checks agree · Experimental only.");
     } else if (recommendation === "SELL") {
