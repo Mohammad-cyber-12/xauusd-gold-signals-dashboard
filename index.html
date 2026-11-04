@@ -69,6 +69,24 @@ footer{text-align:center;color:var(--muted);font-size:12px;padding:15px}
 <p class="note"><strong>Safety rule:</strong> BUY/SELL recommendations are disabled until this deployed model passes its own leakage-checked, cost-aware out-of-sample evaluation. This page is for monitoring and research only.</p>
 </section>
 
+
+<section class="card">
+<div class="row">
+<div><div class="label">M5 forward research tracker</div><h2 style="margin:8px 0">Observed model outcomes</h2></div>
+<div class="label" id="researchCount">Loading…</div>
+</div>
+<div class="grid">
+<div class="metric"><div class="label">5-minute accuracy</div><div class="value" id="acc5">—</div><div class="note" id="n5">0 resolved</div></div>
+<div class="metric"><div class="label">10-minute accuracy</div><div class="value" id="acc10">—</div><div class="note" id="n10">0 resolved</div></div>
+<div class="metric"><div class="label">15-minute accuracy</div><div class="value" id="acc15">—</div><div class="note" id="n15">0 resolved</div></div>
+<div class="metric"><div class="label">UP / DOWN predictions</div><div class="value" id="directions">—</div><div class="note">Recorded unique candle predictions</div></div>
+</div>
+<p class="note" id="scoreBuckets">Confidence groups: waiting for observations.</p>
+<p class="note" id="researchStorage">Tracker status: loading.</p>
+<p class="note"><strong>How to read this:</strong> 5m checks the next candle body (close vs open), matching the model's training target. 10m and 15m measure price direction from the prediction candle's close. These are different outcome definitions.</p>
+<p class="note"><strong>Limitations:</strong> This first version stores observations in API memory, so a Render restart or redeploy resets the history. Actual spread and execution costs are not in the candle feed, so cost-adjusted P&amp;L is intentionally not reported. A small sample is not evidence of an edge.</p>
+</section>
+
 <section class="card">
 <div class="row">
 <div><div class="label">Data connection</div><p id="status">Not checked yet</p></div>
@@ -91,6 +109,36 @@ const API = "https://xauusd-ai-api-ka8j.onrender.com";
 const $ = id => document.getElementById(id);
 let busy = false;
 let lastAutoCandle = null;
+
+
+async function loadPerformance() {
+  try {
+    const response = await fetch(API + "/research/performance?nocache=" + Date.now(), {cache:"no-store"});
+    if (!response.ok) throw new Error("HTTP " + response.status);
+    const data = await response.json();
+    $("researchCount").textContent = data.predictions_recorded + " predictions";
+    $("directions").textContent = (data.directions.UP || 0) + " / " + (data.directions.DOWN || 0);
+    for (const h of ["5m","10m","15m"]) {
+      const row = data.horizons[h] || {};
+      $( "acc" + h.slice(0,-1) ).textContent =
+        row.directional_accuracy_pct == null ? "—" : row.directional_accuracy_pct.toFixed(2) + "%";
+      $("n" + h.slice(0,-1)).textContent =
+        (row.resolved_predictions || 0) + " resolved · " + (row.correct || 0) + " correct";
+    }
+    const buckets = data.score_buckets || {};
+    $("scoreBuckets").textContent = "5m accuracy by score: " +
+      Object.entries(buckets).map(([name, value]) => {
+        const accuracy = value["5m"].directional_accuracy_pct;
+        return name.replaceAll("_"," ") + " (" + value.predictions + "): " +
+          (accuracy == null ? "not enough outcomes" : accuracy.toFixed(1) + "%");
+      }).join(" · ");
+    $("researchStorage").textContent = "Storage: " + data.storage +
+      ". " + data.history_note + " " + data.cost_note;
+  } catch (err) {
+    $("researchCount").textContent = "Unavailable";
+    $("researchStorage").textContent = "Forward tracker unavailable: " + String(err.message || err);
+  }
+}
 
 function showSignal(text, cls, detail) {
   $("signal").textContent = text;
@@ -121,6 +169,7 @@ async function loadPrediction(manual = false) {
     }
     if (!response.ok) { let body = ""; try { body = await response.text(); } catch (_) {} throw new Error("Prediction endpoint returned HTTP " + response.status + (body ? ": " + body.slice(0, 220) : "")); }
     const data = await response.json();
+    loadPerformance();
     if (data.detail) throw new Error(typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail));
     const candleKey = data.latest_closed_candle_utc || null;
     if (!manual && candleKey && candleKey === lastAutoCandle) {
@@ -170,7 +219,9 @@ async function loadPrediction(manual = false) {
 showSignal("CONNECTING…", "wait", "Checking for the latest closed M5 candle.");
 $("status").textContent = "Automatic monitoring · checking every 25 seconds";
 loadPrediction(false);
+loadPerformance();
 setInterval(() => loadPrediction(false), 25000);
+setInterval(loadPerformance, 60000);
 </script>
 </body>
 </html>
